@@ -22,13 +22,12 @@
         private static readonly string TimeStamp = DateTime.Now.ToString(ConfigurationManager.AppSettings.Get("TimeStampFormat"), CultureInfo.InvariantCulture);
         static void Main(string[] args)
         {
-            Dictionary<string, string> ftpFiles = new Dictionary<string, string>();
             _logFile = ConfigurationManager.AppSettings.Get("BackUpDirectory") + "\\Log_" + TimeStamp + ".txt";
+
             try
             {
                 using (var sqlConnection = new SqlConnection(ConfigurationManager.ConnectionStrings["sqlConnection"].ConnectionString))
                 {
-                    //  ServerConnection serverConnection = new ServerConnection(ConfigurationManager.AppSettings.Get("ServerConnection"));
                     var serverConnection = new ServerConnection(sqlConnection);
                     serverConnection.StatementTimeout = 0; //no timeout
                     string[] excludeDbs = ConfigurationManager.AppSettings.Get("ExcludeDbs").Split(',');
@@ -123,13 +122,13 @@
                                     backup.Incremental = true;
                                 backup.Database = db.Name;
 
-                                BackupDeviceItem backupDeviceItem = new BackupDeviceItem(fileName.ToString(), DeviceType.File);
+                                var backupDeviceItem = new BackupDeviceItem(fileName.ToString(), DeviceType.File);
                                 backup.Devices.Add(backupDeviceItem);
                                 backup.SqlBackup(_server);
                                 WriteLog(fileName + " Backup Succeeded ");
 
                                 //zip file
-                                zipFile(fileName.ToString(), out zipFileName);
+                                ZipFile(fileName.ToString(), out zipFileName);
                                 WriteLog(fileName + " Zip Succeeded ");
 
                                 //Remove .bak once zipped and any old files if config DeletePreviousFiles set to true
@@ -184,7 +183,7 @@
                     File.Delete(fileName.ToString());
                     WriteLog(fileName + " Remove Bak File Succeeded ");
                 }
-                catch (System.IO.IOException e)
+                catch (IOException e)
                 {
                     WriteLog(e.Message + " Remove Bak File Failed ");
                 }
@@ -195,22 +194,19 @@
             //remove the previous zips if they exist
             if (Convert.ToBoolean(ConfigurationManager.AppSettings.Get("DeletePreviousFiles")))
             {
-                if (removeAll)//only remove old zips if it is a fullbackup day
+                if (removeAll)//only remove old zips if it is a full-backup day
                 {
                     toDirectory = toDirectory.Replace("\\Full", "");
-                    foreach (FileInfo fileInfo in new DirectoryInfo(toDirectory.ToString()).GetFiles("*.*", SearchOption.AllDirectories))
+                    foreach (var fileInfo in new DirectoryInfo(toDirectory.ToString()).GetFiles("*.*", SearchOption.AllDirectories).Where(fileInfo => String.Compare(fileInfo.Name, Path.GetFileName(zipFileName), StringComparison.Ordinal) == -1))
                     {
-                        if (fileInfo.Name.CompareTo(Path.GetFileName(zipFileName)) == -1)
-                        {
-                            fileInfo.Delete();
-                            WriteLog(fileInfo.Name + " Removed ");
-                        }
+                        fileInfo.Delete();
+                        WriteLog(fileInfo.Name + " Removed ");
                     }
                 }
             }
         }
 
-        private static void zipFile(string fileName, out string zipFileName)
+        private static void ZipFile(string fileName, out string zipFileName)
         {
             #region 7zip live code
             zipFileName = fileName.Replace(".bak", ".7z");
@@ -224,21 +220,22 @@
                 zipFileName = string.Empty;
                 return;
             }
-            else if (f.Length > 524228000) //500MB
+            if (f.Length > 524228000) //500MB
                 sb.Replace("-mx9", "-mx5");
+
             sb.Append(zipFileName);
             sb.Append(" ");
             sb.Append(fileName);
 
-            //strSB = " a -t7z -mx9 C:\\SQLBackup\\Brighton\\test.7z C:\\SQLBackup\\Brighton\\Brighton_2010-04-19_1559.bak";
-
-            ProcessStartInfo psiOpt = new ProcessStartInfo(@"C:\Program Files\7-Zip\7z.exe", sb.ToString());
-            psiOpt.WindowStyle = ProcessWindowStyle.Normal;
-            psiOpt.RedirectStandardOutput = true;
-            psiOpt.UseShellExecute = false;
-            psiOpt.CreateNoWindow = true;
+            var psiOpt = new ProcessStartInfo(string.Format(@"{0}", ConfigurationManager.AppSettings["7ZipFileLocation"]), sb.ToString())
+            {
+                WindowStyle = ProcessWindowStyle.Normal,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
             // Create the actual process object
-            Process procCommand = Process.Start(psiOpt);
+            var procCommand = Process.Start(psiOpt);
             // Receives the output of the Command Prompt
             StreamReader srIncoming = procCommand.StandardOutput;
             // Show the result
@@ -247,54 +244,11 @@
             procCommand.WaitForExit();
 
             #endregion
-
-            #region Previous live code
-            /*            zipFileName = fileName.Replace(".bak", ".zip");
-            ZipOutputStream zipOut = new ZipOutputStream(File.Create(zipFileName));
-            FileInfo fi = new FileInfo(fileName);
-            ZipEntry entry = new ZipEntry(fi.Name);
-            FileStream sReader = File.OpenRead(fileName);
-            //byte[] buff = new byte[Convert.ToInt32(sReader.Length)];
-            //sReader.Read(buff, 0, (int)sReader.Length);
-            entry.DateTime = fi.LastWriteTime;
-            entry.Size = sReader.Length;
-            zipOut.PutNextEntry(entry);
-            // Create a buffer for reading the files
-            byte[] buf = new byte[32768];
-            // Transfer bytes from the file to the ZIP file
-            int len;
-            while ((len = sReader.Read(buf, 0, buf.Length)) > 0)
-            {
-                zipOut.Write(buf, 0, len);
-            }
-            sReader.Close();
-            //zipOut.Write(buff, 0, buff.Length);
-            zipOut.CloseEntry();
-            zipOut.Finish();
-            zipOut.Close(); */
-
-            #endregion
-
-            #region Alternative Read
-            //creates the directory structure inside zip
-            ////create our zip file
-            //ZipFile z = ZipFile.Create(zipFileName);
-            ////initialize the file so that it can accept updates
-            //z.BeginUpdate();
-
-            ////add the file to the zip file
-            //z.Add(fileName);
-
-            ////commit the update once we are done
-            //z.CommitUpdate();
-            ////close the file
-            //z.Close();
-            #endregion
         }
 
         private static void FtpUpload(string filename)
         {
-            FileInfo fileInfo = new FileInfo(filename);
+            var fileInfo = new FileInfo(filename);
             string uri = ConfigurationManager.AppSettings.Get("FtpServer") + fileInfo.Name;
             FtpWebRequest reqFTP;
 
